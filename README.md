@@ -51,3 +51,11 @@ Search & Filter
 GET /search?search=<text> → Search models
 
 GET /findmodels?framework=<framework> → Filter models
+
+
+
+
+
+
+## Author
+**Akib Bhuiyan**
