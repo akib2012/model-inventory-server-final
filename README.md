@@ -52,6 +52,16 @@ GET /search?search=<text> → Search models
 
 GET /findmodels?framework=<framework> → Filter models
 
+
+## Future Scope
+- Implement **role-based authentication** for admins and regular users  
+- Add **payment gateway integration** for model purchases  
+- Develop a **frontend dashboard** for real-time model management  
+- Enable **analytics and reporting** for purchased models  
+- Add **notifications and email alerts** for new models or updates  
+- Integrate **AI-based recommendations** for users based on their purchase history  
+- Optimize for **performance and scalability** for large datasets
+
 This backend server provides a complete solution to manage AI models, handle user authentication, track purchases, and filter/search models efficiently. It is built with scalability and security in mind, making it easy to extend for future features.
 
 
