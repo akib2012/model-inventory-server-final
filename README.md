@@ -21,14 +21,26 @@ Node.js | Express.js | MongoDB | Firebase Admin SDK | Cors | dotenv
 ## API Endpoints
 
 ### Models
-- GET /models` → Get all models  
-- GET /recent-model` → Get 6 most recent models  
-- GET /models/:id` → Get model by ID  
-- POST /models` → Add a new model  
-- PATCH /models/:id` → Update a model  
-- DELETE /models/:id` → Delete a model 
- 
+- GET /models  → Get all models  
+- GET /recent-model  → Get 6 most recent models  
+- GET /models/:id  → Get model by ID  
+- POST /models  → Add a new model  
+- PATCH /models/:id  → Update a model  
+- DELETE /models/:id  → Delete a model 
 
+### Recent Models
+-  GET /recent-model  → Fetch the 6 most recently added models
+
+### My Models
+-  GET /my-models?email=<email>  → Fetch models created by a specific user (requires Firebase token)
+
+### Purchase
+-  POST /my-Purchase  → Add purchase  
+-  GET /my-Purchase?email=<email>  → User purchases  
+-  POST /my-Purchase/:id  → Add & increment purchased count
+
+### Users
+-  POST /users  → Add user  
 
 
 
