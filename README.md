@@ -41,6 +41,12 @@ Node.js | Express.js | MongoDB | Firebase Admin SDK | Cors | dotenv
 
 ### Users
 -  POST /users  → Add user  
+## Search & Filter
+- `GET /search?search=<text>` → Search models by name  
+- `GET /findmodels?framework=<framework>` → Filter models by framework
+
+### Authorization
+- Certain routes like `/my-models` require a Firebase token in the header:  
 
 
 

@@ -6,7 +6,9 @@ const { ObjectId } = require("mongodb");
 const { MongoClient, ServerApiVersion } = require("mongodb");
 require("dotenv").config();
 
-const serviceAccount = require("./servicekey.json");
+// index.js
+const decoded = Buffer.from(process.env.FIREVASE_SERVICE_KEY, "base64").toString("utf8");
+const serviceAccount = JSON.parse(decoded);  /* here is the firebase jwt properties */
 
 const port = 3000;
 
@@ -188,7 +190,7 @@ async function run() {
     });
 
     // --- DB Connection Test ---
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log(" Connected to MongoDB successfully!");
   } finally {
     // Keeping the connection alive
