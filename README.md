@@ -52,10 +52,12 @@ GET /search?search=<text> → Search models
 
 GET /findmodels?framework=<framework> → Filter models
 
-
+This backend server provides a complete solution to manage AI models, handle user authentication, track purchases, and filter/search models efficiently. It is built with scalability and security in mind, making it easy to extend for future features.
 
 
 
 
 ## Author
 **Akib Bhuiyan**
+
+
