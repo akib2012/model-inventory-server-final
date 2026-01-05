@@ -1,205 +1,356 @@
-const express = require("express");
-const app = express();
-const admin = require("firebase-admin");
-const cors = require("cors");
-const { ObjectId } = require("mongodb");
-const { MongoClient, ServerApiVersion } = require("mongodb");
 require("dotenv").config();
 
-// index.js
-const decoded = Buffer.from(process.env.FIREVASE_SERVICE_KEY, "base64").toString("utf8");
-const serviceAccount = JSON.parse(decoded);  /* here is the firebase jwt properties */
+const express = require("express");
+const cors = require("cors");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const admin = require("firebase-admin");
 
+const app = express();
 const port = 3000;
 
-// --- Middleware ---
+// Middleware
 app.use(cors());
 app.use(express.json());
 
-// --- Firebase Admin SDK ---
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
+// Firebase Admin Initialization
+if (process.env.FIREVASE_SERVICE_KEY) {
+  const decoded = Buffer.from(
+    process.env.FIREVASE_SERVICE_KEY,
+    "base64"
+  ).toString("utf-8");
+  const serviceAccount = JSON.parse(decoded);
 
-// --- Token Authorization Middleware ---
-const authorizariontoken = async (req, res, next) => {
-  const token = req.headers.authorization;
-  if (!token) {
-    return res.status(401).send({ message: "Token not found!" });
-  }
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+  });
+  console.log("Firebase Admin initialized.");
+} else {
+  console.log("FB_SERVICE_KEY not found in .env");
+}
 
-  const finaltoken = token.split(" ")[1];
+// JWT middleware
+const verifyJWT = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader)
+    return res.status(401).send({ message: "Unauthorized: No token" });
+
+  const token = authHeader.split(" ")[1];
   try {
-    await admin.auth().verifyIdToken(finaltoken);
+    const decoded = await admin.auth().verifyIdToken(token);
+    req.tokenEmail = decoded.email;
     next();
-  } catch (error) {
-    res.status(401).send("Unauthorized access!");
+  } catch {
+    return res.status(401).send({ message: "Unauthorized: Invalid token" });
   }
 };
 
-// --- MongoDB Connection ---
+// MongoDB setup
 const uri = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASS}@cluster0.exfto5h.mongodb.net/?appName=Cluster0`;
-
 const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  },
-});
-
-// --- Server Root ---
-app.get("/", (req, res) => {
-  res.send("AI Inventory Project Server Running ✅");
+  serverApi: { version: ServerApiVersion.v1 },
 });
 
 async function run() {
   try {
-    await client.connect();
-
-    // --- Collections ---
+    // await client.connect();
     const db = client.db("ai_model_inventory_manager");
     const modelscollections = db.collection("models");
     const userscollections = db.collection("users");
-    const Purchasecollections = db.collection("Purchase");
 
-    // --- Recent Models ---
-    app.get("/recent-model", async (req, res) => {
-      const cursor = modelscollections.find().sort({ createdAt: -1 }).limit(6);
-      const result = await cursor.toArray();
-      res.send(result);
-    });
+    // Root route
+    app.get("/", (req, res) => res.send("AI Model Inventory Server Running"));
 
-    // --- Get All Models ---
+    // Get all models
     app.get("/models", async (req, res) => {
-      const cursor = modelscollections.find();
-      const result = await cursor.toArray();
-      res.send(result);
+      const models = await modelscollections.find().toArray();
+      res.send(models);
     });
 
-    // --- Add Model ---
+    app.get("/dashboard-stats", verifyJWT, async (req, res) => {
+      try {
+        const totalModels = await modelscollections.countDocuments();
+        const totalUsers = await userscollections.countDocuments();
+
+        const allModels = await modelscollections.find().toArray();
+        const totalDownloads = allModels.reduce(
+          (sum, model) => sum + (model.dowloded_by?.length || 0),
+          0
+        );
+
+        res.send({
+          totalModels,
+          totalUsers,
+          totalDownloads,
+        });
+      } catch (error) {
+        res.status(500).send({ message: "Failed to load dashboard stats" });
+      }
+    });
+
+    app.get("/dashboard-models", verifyJWT, async (req, res) => {
+      try {
+        const models = await modelscollections
+          .find({})
+          .sort({ createdAt: -1 })
+          .project({
+            name: 1,
+            framework: 1,
+            createdAt: 1,
+            dowloded_by: 1,
+          })
+          .toArray();
+
+        const formatted = models.map((model) => ({
+          _id: model._id,
+          name: model.name,
+          framework: model.framework,
+          createdAt: model.createdAt,
+          downloads: model.dowloded_by?.length || 0,
+        }));
+
+        res.send(formatted);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to load dashboard models" });
+      }
+    });
+
+    // Get recent models
+    app.get("/recent-model", async (req, res) => {
+      const models = await modelscollections
+        .find()
+        .sort({ createdAt: -1 })
+        .limit(6)
+        .toArray();
+      res.send(models);
+    });
+
+    // Get model by ID
+    app.get("/models/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const model = await modelscollections.findOne({
+          _id: new ObjectId(id),
+        });
+        if (!model) return res.status(404).send({ message: "Model not found" });
+        res.send(model);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch model" });
+      }
+    });
+
+    // Create new model
     app.post("/models", async (req, res) => {
-      const newmodel = req.body;
+      const newmodel = { ...req.body, dowloded_by: [] }; // initialize downloads
       const result = await modelscollections.insertOne(newmodel);
       res.send(result);
     });
 
-    // --- Get Model by ID ---
-    app.get("/models/:id", async (req, res) => {
+    // Purchase model
+    app.post("/my-Purchase/:id", verifyJWT, async (req, res) => {
       try {
         const id = req.params.id;
-        const query = { _id: new ObjectId(id) };
-        const result = await modelscollections.findOne(query);
-        if (!result) return res.status(404).send({ message: "Model not found" });
-        res.send(result);
+        const email = req.tokenEmail;
+
+        const model = await modelscollections.findOne({
+          _id: new ObjectId(id),
+        });
+        if (!model) return res.status(404).send({ message: "Model not found" });
+
+        if (!model.dowloded_by) model.dowloded_by = [];
+
+        if (model.dowloded_by.includes(email)) {
+          return res.status(400).send({ message: "Already purchased" });
+        }
+
+        await modelscollections.updateOne(
+          { _id: new ObjectId(id) },
+          { $push: { dowloded_by: email } }
+        );
+
+        res.send({ message: "Model purchased successfully" });
       } catch (error) {
-        console.error(error);
-        res.status(500).send({ message: "Server Error" });
+        res.status(500).send({ message: "Purchase failed" });
       }
     });
 
-    // --- Update Model ---
-    app.patch("/models/:id", async (req, res) => {
-      const id = req.params.id;
-      const updateproduct = req.body;
-      const query = { _id: new ObjectId(id) };
-      const update = { $set: updateproduct };
-      const result = await modelscollections.updateOne(query, update);
-      res.send(result);
-    });
-
-    // --- Delete Model ---
-    app.delete("/models/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await modelscollections.deleteOne(query);
-      res.send(result);
-    });
-
-    // --- My Models (by email, requires auth) ---
-    app.get("/my-models", authorizariontoken, async (req, res) => {
-      const email = req.query.email;
-      const result = await modelscollections.find({ createdBy: email }).toArray();
-      res.send(result);
-    });
-
-    // --- Purchase Routes ---
-    app.post("/my-Purchase", async (req, res) => {
-      const purchaseData = req.body;
-      const result = await Purchasecollections.insertOne(purchaseData);
-      res.send(result);
-    });
-
-    app.get("/my-Purchase", async (req, res) => {
-      const email = req.query.email;
-      const result = await Purchasecollections.find({ dowloded_by: email }).toArray();
-      res.send(result);
-    });
-
-    app.post("/my-Purchase/:id", async (req, res) => {
+    // Get logged-in user's purchased models
+    app.get("/my-Purchase", verifyJWT, async (req, res) => {
       try {
-        const purchaseData = req.body;
-        const id = req.params.id;
-        const result = await Purchasecollections.insertOne(purchaseData);
+        const email = req.tokenEmail;
 
-        const filter = { _id: new ObjectId(id) };
-        const update = { $inc: { purchased: 1 } };
-        const updatepurchased = await modelscollections.updateOne(filter, update);
+        const models = await modelscollections
+          .find({ dowloded_by: email })
+          .toArray();
 
-        res.send({ result, updatepurchased });
-      } catch (err) {
-        console.error(err);
-        res.status(500).send({ message: "Server error" });
+        res.send({
+          count: models.length,
+          models,
+        });
+      } catch (error) {
+        console.error("Fetch purchases error:", error);
+        res.status(500).send({ message: "Failed to fetch purchases" });
+      }
+    });
+    app.get("/userPurchase", verifyJWT, async (req, res) => {
+      try {
+        const email = req.tokenEmail;
+
+        const models = await modelscollections
+          .find({ dowloded_by: email })
+          .toArray();
+
+        res.send({
+          count: models.length,
+          models,
+        });
+      } catch (error) {
+        console.error("Fetch purchases error:", error);
+        res.status(500).send({ message: "Failed to fetch purchases" });
       }
     });
 
-    // --- User Routes ---
+    // Update model (EDIT)
+    app.patch("/models/:id", verifyJWT, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const email = req.tokenEmail;
+        const updatedData = req.body;
+
+        // Check valid ObjectId
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({ message: "Invalid model ID" });
+        }
+
+        // Find model
+        const existingModel = await modelscollections.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!existingModel) {
+          return res.status(404).send({ message: "Model not found" });
+        }
+
+        // Authorization check (owner only)
+        if (existingModel.createdBy !== email) {
+          return res.status(403).send({ message: "Forbidden: Not your model" });
+        }
+
+        // Prevent changing owner & downloads
+        delete updatedData.createdBy;
+        delete updatedData.dowloded_by;
+        delete updatedData._id;
+
+        const result = await modelscollections.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              ...updatedData,
+              updatedAt: new Date(),
+            },
+          }
+        );
+
+        res.send({
+          modifiedCount: result.modifiedCount,
+        });
+      } catch (error) {
+        console.error("Update error:", error);
+        res.status(500).send({ message: "Failed to update model" });
+      }
+    });
+
+    // Delete model
+    app.delete("/models/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await modelscollections.deleteOne({
+          _id: new ObjectId(id),
+        });
+        res.send({ deletedCount: result.deletedCount });
+      } catch (error) {
+        res.status(500).send({ message: "Delete failed" });
+      }
+    });
+
+    // Get logged-in user's models
+    app.get("/my-models", verifyJWT, async (req, res) => {
+      try {
+        const email = req.tokenEmail;
+        const models = await modelscollections
+          .find({ createdBy: email })
+          .toArray();
+        res.send({ count: models.length, models });
+      } catch (err) {
+        res.status(500).send({ message: "Error fetching your models", err });
+      }
+    });
+
+    // User registration
     app.post("/users", async (req, res) => {
       const user = req.body;
+      const existing = await userscollections.findOne({
+        user_mail: user.user_mail,
+      });
+      if (existing) return res.send({ message: "user exists" });
+
       const result = await userscollections.insertOne(user);
       res.send(result);
     });
 
-    // --- Search Functionality ---
-    app.get("/search", async (req, res) => {
-      const search_text = req.query.search;
-      const result = await modelscollections
-        .find({ name: { $regex: search_text, $options: "i" } })
-        .toArray();
-      res.send(result);
+    // Get public profile by email
+    app.get("/profile/:email", async (req, res) => {
+      try {
+        const email = decodeURIComponent(req.params.email).trim();
+        const user = await userscollections.findOne(
+          { user_mail: email },
+          { projection: { user_name: 1, user_photo: 1, role: 1, _id: 0 } }
+        );
+        if (!user) return res.status(404).send({ message: "User not found" });
+        res.send(user);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch profile" });
+      }
     });
 
-    // --- Framework Filter ---
+    // Find models with framework filter
+    // Search + Filter models
     app.get("/findmodels", async (req, res) => {
       try {
-        const { framework } = req.query; // e.g. ?framework=TensorFlow,PyTorch
-        let query = {};
+        const { search, framework } = req.query;
 
-        if (framework && framework.length > 0) {
-          const frameworks = framework.split(",").map((f) => f.trim());
-          // Case-insensitive match
-          query.framework = { $in: frameworks.map(f => new RegExp(`^${f}$`, "i")) };
+        const andConditions = [];
+
+        if (search) {
+          andConditions.push({
+            $or: [
+              { name: { $regex: search, $options: "i" } },
+              { framework: { $regex: search, $options: "i" } },
+              { dataset: { $regex: search, $options: "i" } },
+            ],
+          });
         }
+
+        if (framework) {
+          andConditions.push({
+            framework: { $in: framework.split(",") },
+          });
+        }
+
+        const query = andConditions.length ? { $and: andConditions } : {};
 
         const result = await modelscollections.find(query).toArray();
         res.send(result);
       } catch (err) {
-        console.error("Error fetching models:", err);
-        res.status(500).send({ message: "Server error" });
+        res.status(500).send({ message: "Failed to fetch models" });
       }
     });
 
-    // --- DB Connection Test ---
-    // await client.db("admin").command({ ping: 1 });
-    console.log(" Connected to MongoDB successfully!");
+    console.log("Server connected to MongoDB");
   } finally {
-    // Keeping the connection alive
+    // keep client open
   }
 }
 
 run().catch(console.dir);
 
-// --- Start Server ---
-app.listen(port, () => {
-  console.log(` Server running on http://localhost:${port}`);
-});
+app.listen(port, () => console.log(`Server listening on port ${port}`));
